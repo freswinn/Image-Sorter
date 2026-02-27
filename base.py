@@ -22,7 +22,6 @@ from PySide6.QtWidgets import (
 ###############
 ### GLOBALS ###
 ###############
-debug = True
 filetypes = {
     "all": ["jpg", "jpeg", "bmp", "png", "webp", "svg", "gif"],
     "still": ["jpg", "jpeg", "bmp", "png", "webp", "svg"],
@@ -30,7 +29,7 @@ filetypes = {
     "normal": ["jpg", "jpeg", "bmp", "png", "webp"],
 }
 source_folder: str
-source_filelist: list[str]
+source_filelist: list[str] = []
 source_count: int = 0
 current_file: str = ""
 current_count: int = 0
@@ -61,7 +60,10 @@ shortcut_colors = [
 ##########################
 ### DEFINING FUNCTIONS ###
 ##########################
-def dprint(text: str):
+debug = True
+
+
+def dprint(text: str):  # debug print
     if debug:
         print(text)
 
@@ -91,6 +93,10 @@ def update_source_filelist(_change_to_folder: str = ""):
 ########################
 class ImageDisplay(QLabel):
     empty: str = """Welcome!
+
+    Currently, you either have no source folder selected or the source folder contains
+    no files with recognized image formats.
+
     Choose a source folder (button in top-left) to start viewing image files.
     Use the left and right cursor keys to skip files.
     Choose target folders for each of the keyboard shortcuts (along the left).
@@ -106,8 +112,8 @@ class ImageDisplay(QLabel):
 
     def loadImage(self):
         global current_count, current_file
-        if current_count == 0:
-            self.setPixmap(QPixmap())
+        if current_count == 0 or current_file == "":
+            self.setText(self.empty)
             return
 
         filetype = current_file.split(".")[-1].lower()
@@ -138,8 +144,8 @@ class ShortcutButton(QPushButton):
         self.clicked.connect(self.shortcutKeyClicked)
         self.setText(self.shortcut_key)
         self.setStyleSheet(_color)
-        self.setMinimumSize(50, 20)
-        self.setMaximumSize(50, 40)
+        self.setMinimumSize(50, 24)
+        self.setMaximumSize(50, 24)
 
     def shortcutKeyClicked(self):
         if debug:
@@ -148,24 +154,36 @@ class ShortcutButton(QPushButton):
 
 class ChangeTargetButton(QPushButton):
     shortcut_key: str
+    clear = False
 
     def __init__(self, _key: str):
         super().__init__()
+        if _key.startswith("Clear_"):
+            self.clear = True
+            _key = _key[-1]
         self.shortcut_key = _key
         _color = shortcut_colors[0]
         if _key in "ASDFG":
             _color = shortcut_colors[1]
         elif _key in "ZXCVB":
             _color = shortcut_colors[2]
-        self.clicked.connect(self.changeButtonClicked)
-        self.setText("--No target selected--")
+        if self.clear:
+            self.setText("X")
+            self.setMinimumSize(24, 24)
+            self.setMaximumSize(24, 24)
+        else:
+            self.setText("--No target selected--")
+            self.setMinimumSize(200, 24)
+            self.setMaximumSize(200, 24)
         self.setStyleSheet(_color)
-        self.setMinimumSize(200, 24)
-        self.setMaximumSize(200, 24)
+        self.clicked.connect(self.changeButtonClicked)
 
     def changeButtonClicked(self):
         if debug:
-            print("Change clicked: " + self.shortcut_key)
+            text = "Changed clicked: " + self.shortcut_key
+            if self.clear:
+                text += ", CLEAR"
+            print(text)
 
 
 class FilenameLabel(QLabel):
@@ -194,23 +212,23 @@ class FileCounter(QLabel):
     ):
         global current_count, source_filelist, source_count
 
+        if source_count == 0:
+            current_count = 0
+            self.setText("File - / -")
+            return
+
         if _counter_reset:
             current_count = 1
 
         current_count += _counter_change
 
-        if source_count == 0:
-            current_count = 0
-            self.setText("File - / -")
-
-        elif current_count > source_count:
+        if current_count > source_count:
             current_count = 1
 
-        elif current_count == 0:
+        if current_count == 0:
             current_count = source_count
 
-        else:
-            self.setText(f"File {current_count} / {source_count}")
+        self.setText(f"File {current_count} / {source_count}")
 
     def nextPressed(self):
         global source_count
@@ -358,17 +376,30 @@ class MainWindow(QMainWindow):
         change_btn.setObjectName("Change Target " + shortcut_key)
         if debug:
             change_btn.setToolTip("Change Target " + shortcut_key)
+        clear_btn = ChangeTargetButton("Clear_" + shortcut_key)
+        clear_btn.setObjectName("Clear Target " + shortcut_key)
+        if debug:
+            change_btn.setToolTip("Clear Target " + shortcut_key)
         row.addWidget(short_btn)
         row.addWidget(change_btn)
+        row.addWidget(clear_btn)
         return row
 
     def selectSourceFolder(self):
-        global source_filelist, source_folder
+        global source_filelist, source_folder, current_count, current_file
+
         response = QFileDialog.getExistingDirectory(
             self, "Select Source Folder", os.getcwd()
         )
         source_folder = response
         update_source_filelist()
+        if len(source_filelist) > 0:
+            current_count = 1
+            current_file = source_filelist[current_count - 1]
+        else:
+            current_count = 0
+            current_file = ""
+
         self.findChild(
             QPushButton, "Source Button", Qt.FindChildOption.FindChildrenRecursively
         ).setText(f"Source Folder: {source_folder.split('/')[-1]}")
@@ -379,14 +410,29 @@ class MainWindow(QMainWindow):
             ImageDisplay, "Image", Qt.FindChildOption.FindChildrenRecursively
         ).loadImage()
 
+    def selectTargetFolder(self, shortcut_key: str):
+        global shortcuts
+
+        response = QFileDialog.getExistingDirectory(
+            self, "Select Target Folder", os.getcwd()
+        )
+        target_text: str = ""
+
+        self.findChild(
+            QPushButton, "Target Button", Qt.FindChildOption.FindChildrenRecursively
+        ).setText(target_text)
+        self.findChild(
+            ImageDisplay, "Image", Qt.FindChildOption.FindChildrenRecursively
+        ).loadImage()
+
     def nextClicked(self):
         global current_file, source_filelist, current_count
         if len(source_filelist) <= 0:
             return
-        current_file = source_filelist[current_count - 1]
         self.findChild(
             FileCounter, "File Counter", Qt.FindChildOption.FindChildrenRecursively
         ).nextPressed()
+        current_file = source_filelist[current_count - 1]
         self.findChild(
             ImageDisplay, "Image", Qt.FindChildOption.FindChildrenRecursively
         ).loadImage()
@@ -395,10 +441,10 @@ class MainWindow(QMainWindow):
         global current_file, source_filelist, current_count
         if len(source_filelist) <= 0:
             return
-        current_file = source_filelist[current_count - 1]
         self.findChild(
             FileCounter, "File Counter", Qt.FindChildOption.FindChildrenRecursively
-        ).nextPressed()
+        ).prevPressed()
+        current_file = source_filelist[current_count - 1]
         self.findChild(
             ImageDisplay, "Image", Qt.FindChildOption.FindChildrenRecursively
         ).loadImage()
